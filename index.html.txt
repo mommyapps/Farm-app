@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Farm Inventory Pro + Shopping</title>
+  <style>
+    :root {
+      --primary: #2e7d32;
+      --secondary: #4caf50;
+      --accent: #ff9800;
+      --danger: #f44336;
+      --bg: #f4f7f6;
+      --bought: #d1d1d1;
+    }
+    body { font-family: 'Segoe UI', sans-serif; margin: 0; padding: 20px; background: var(--bg); color: #333; }
+    .container { max-width: 1000px; margin: 0 auto; }
+    
+    h1 { color: var(--primary); display: flex; align-items: center; justify-content: space-between; }
+    
+    /* Layout Sections */
+    .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); margin-bottom: 20px; }
+    .controls { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+    
+    /* Buttons */
+    button { padding: 10px 18px; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; transition: 0.2s; color: white; }
+    .btn-add { background: var(--primary); }
+    .btn-trip { background: #673ab7; } /* Purple for Expedition */
+    .btn-export { background: var(--accent); }
+    .btn-delete { background: var(--danger); padding: 5px 10px; font-size: 12px; }
+    .btn-finish { background: var(--primary); width: 100%; margin-top: 20px; font-size: 1.1em; }
+    
+    /* Table & List */
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+    th, td { padding: 12px; border-bottom: 1px solid #eee; text-align: left; }
+    th { background: var(--secondary); color: white; }
+    
+    /* Shopping Mode Styles */
+    .shopping-item { display: flex; align-items: center; padding: 15px; border-bottom: 1px solid #eee; cursor: pointer; }
+    .shopping-item.checked { background: #f0f0f0; text-decoration: line-through; color: #888; }
+    .shopping-item input { margin-right: 15px; transform: scale(1.5); }
+    .qty-badge { background: var(--accent); color: white; padding: 2px 8px; border-radius: 12px; margin-left: 10px; font-size: 0.9em; }
+
+    .hidden { display: none; }
+    .low-stock { color: var(--danger); font-weight: bold; }
+    [contenteditable="true"]:focus { outline: 2px solid var(--secondary); background: #fffde7; }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <div id="mainView">
+    <h1>🌾 Farm Inventory Pro 
+      <button class="btn-trip" onclick="toggleMode(true)">🛒 Start Shopping Trip</button>
+    </h1>
+
+    <div class="card controls">
+      <input type="text" id="searchInput" placeholder="🔍 Search items..." onkeyup="renderTable()" style="flex-grow:1; padding: 10px; border: 1px solid #ddd; border-radius: 6px;">
+      <button class="btn-export" onclick="exportToCSV()">Export CSV</button>
+    </div>
+
+    <div class="card">
+      <h3>Add New Item</h3>
+      <div class="controls">
+        <input type="text" id="newItem" placeholder="Item Name" style="flex-grow:2">
+        <input type="number" id="newStock" placeholder="Stock" style="width:70px">
+        <input type="number" id="newNeeded" placeholder="Needed" style="width:70px">
+        <select id="newCategory">
+          <option>Kitchen</option><option>Cleaning</option><option>Household</option>
+          <option>Farm Supplies</option><option>Fuel/Gas</option><option>Other</option>
+        </select>
+        <button class="btn-add" onclick="addItem()">Add</button>
+      </div>
+    </div>
+
+    <div class="card" style="padding:0; overflow: hidden;">
+      <table>
+        <thead>
+          <tr>
+            <th>Item</th><th>Category</th><th>Stock</th><th>Needed</th><th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="tableBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div id="shoppingView" class="hidden">
+    <h1>🛒 Shopping Expedition
+      <button style="background:#666" onclick="toggleMode(false)">❌ Cancel</button>
+    </h1>
+    <div class="card">
+      <p>Tap items as you put them in your trolley. "Finish Trip" will add these amounts to your stock.</p>
+      <div id="shoppingList"></div>
+      <button class="btn-finish" onclick="finishTrip()">✅ Finish Trip & Update Stock</button>
+    </div>
+  </div>
+
+  <p id="status" style="font-size: 0.8em; color: #888; text-align: center;">Data auto-saved to browser.</p>
+</div>
+
+<script>
+  let inventory = JSON.parse(localStorage.getItem('farmInv_v2')) || [
+    { id: 1, item: "Diesel", category: "Fuel/Gas", stock: 0, needed: 20, notes: "", bought: false },
+    { id: 2, item: "Dish Soap", category: "Cleaning", stock: 1, needed: 2, notes: "", bought: false }
+  ];
+
+  function save() {
+    localStorage.setItem('farmInv_v2', JSON.stringify(inventory));
+    document.getElementById('status').innerText = "Last saved: " + new Date().toLocaleTimeString();
+  }
+
+  function renderTable() {
+    const tbody = document.getElementById("tableBody");
+    const search = document.getElementById("searchInput").value.toLowerCase();
+    tbody.innerHTML = "";
+
+    inventory.forEach((item, idx) => {
+      if (item.item.toLowerCase().includes(search)) {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td contenteditable="true" onblur="updateField(${idx}, 'item', this.innerText)">${item.item}</td>
+          <td>${item.category}</td>
+          <td contenteditable="true" class="${item.stock === 0 && item.needed > 0 ? 'low-stock' : ''}" onblur="updateField(${idx}, 'stock', this.innerText, true)">${item.stock}</td>
+          <td contenteditable="true" onblur="updateField(${idx}, 'needed', this.innerText, true)">${item.needed}</td>
+          <td><button class="btn-delete" onclick="deleteItem(${idx})">Delete</button></td>
+        `;
+        tbody.appendChild(tr);
+      }
+    });
+  }
+
+  function updateField(idx, field, val, isNum) {
+    inventory[idx][field] = isNum ? (parseInt(val) || 0) : val;
+    save();
+    if(isNum) renderTable();
+  }
+
+  function addItem() {
+    const name = document.getElementById("newItem").value;
+    if(!name) return;
+    inventory.push({
+      id: Date.now(),
+      item: name,
+      category: document.getElementById("newCategory").value,
+      stock: parseInt(document.getElementById("newStock").value) || 0,
+      needed: parseInt(document.getElementById("newNeeded").value) || 0,
+      bought: false
+    });
+    document.getElementById("newItem").value = "";
+    save(); renderTable();
+  }
+
+  function toggleMode(isShopping) {
+    document.getElementById("mainView").classList.toggle("hidden", isShopping);
+    document.getElementById("shoppingView").classList.toggle("hidden", !isShopping);
+    if(isShopping) renderShoppingList();
+  }
+
+  function renderShoppingList() {
+    const listDiv = document.getElementById("shoppingList");
+    listDiv.innerHTML = "";
+    const needs = inventory.filter(i => i.needed > 0);
+
+    if(needs.length === 0) {
+      listDiv.innerHTML = "<p>No items marked as 'Needed'. Add some first!</p>";
+      return;
+    }
+
+    needs.forEach(item => {
+      const div = document.createElement("div");
+      div.className = `shopping-item ${item.bought ? 'checked' : ''}`;
+      div.onclick = () => {
+        item.bought = !item.bought;
+        renderShoppingList();
+      };
+      div.innerHTML = `
+        <input type="checkbox" ${item.bought ? 'checked' : ''}>
+        <span>${item.item}</span>
+        <span class="qty-badge">Buy: ${item.needed}</span>
+      `;
+      listDiv.appendChild(div);
+    });
+  }
+
+  function finishTrip() {
+    if(!confirm("Ready to update stock? Items checked will move to Current Stock.")) return;
+    
+    inventory.forEach(item => {
+      if(item.bought && item.needed > 0) {
+        item.stock += item.needed;
+        item.needed = 0;
+        item.bought = false; // Reset for next time
+      }
+    });
+    
+    save();
+    toggleMode(false);
+    renderTable();
+  }
+
+  function deleteItem(idx) {
+    if(confirm("Remove item?")) { inventory.splice(idx,1); save(); renderTable(); }
+  }
+
+  function exportToCSV() {
+    let csv = "Item,Category,Stock,Needed\n";
+    inventory.forEach(i => csv += `"${i.item}","${i.category}",${i.stock},${i.needed}\n`);
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'farm_inventory.csv';
+    a.click();
+  }
+
+  renderTable();
+</script>
+</body>
+</html>
